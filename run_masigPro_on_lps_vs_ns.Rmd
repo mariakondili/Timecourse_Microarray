@@ -14,7 +14,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r,load_libraries}  
-library(ggplot2)
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(tidyr))
 # BiocManager::install("maSigPro")
@@ -38,14 +37,14 @@ library(maSigPro)
 
 proj_dir <- "/shared/projects/secretome/Col_Femoral/"
 data_dir <- paste0(proj_dir,"Data/")
-workdir  <- paste0(proj_dir,"maSigPro/")
+workdir  <- paste0(proj_dir,"maSigPro_v2/")
 
 setwd(workdir)
 
 ```
 
 
-```{r read_data}
+```{r read_data,echo=F,include=F}
 
 affy_data_74 <- read.delim(paste0(data_dir, 
                         "ExpressionDataNormaliz_Affymetrix_ClariomsHuman_74samples_18627id_edMK.txt"), 
@@ -71,7 +70,7 @@ patients_list %>% head
 ```
 
 
-```{r correct_patient_id }
+```{r correct_patient_id,echo=F,include=F }
 
 pos_cd14 <- grep("CD14_",patients_list$FileID )
 patients_list$FileID[pos_cd14] <- gsub("CD14_", "", patients_list$FileID[pos_cd14])
@@ -83,7 +82,7 @@ patients_list$FileID[pos_hip]  <- gsub("HIP", "", patients_list$FileID[pos_hip])
 ```
 
 
-```{r find_common_ids,echo=T,include=T }
+```{r find_common_ids,echo=F,include=F }
 
 # patients_list$FileID[which(! patients_list$FileID %in% colnames(affy_data_74))]
 patients_list <- patients_list[-which(! patients_list$FileID %in% colnames(affy_data_74)), ]
@@ -111,79 +110,79 @@ Transformation from raw shown in script: transform_raw_data_by_MartinLarsen.R
 ```{r extract_expr, echo=T, include=T }
 
 ##> log2(LPS/NS) of affy_data : 
-log2fc_data <- read.table(paste0(data_dir,"log2FC_transformed_data_total_MartinLarsen.txt"), 
+log2fc_data <- read.table(paste0(data_dir,"log2FC_transformed_data_total_MartinLarsen.tsv"), 
                         sep="\t",header=T)
 
-samplesheet_l2fcData <- log2fc_data[,1:7] # clinical samplesheet only
+samplesheet <- log2fc_data[,1:7] # clinical samplesheet only
 ##> 37 patients
 
-samplesheet_l2fcData$Group %>% as.factor() %>% levels
-
-row.names(samplesheet_l2fcData) <- paste( paste0("X",samplesheet_l2fcData$ID),
-                                          gsub("HIP","",samplesheet_l2fcData$PatientCode),
-                                          samplesheet_l2fcData$TimePointClin,
-                                          samplesheet_l2fcData$Stim, sep="_")
-
-names_wo_0 <- grep("^X[1-9]_", row.names(samplesheet_l2fcData))
-row.names(samplesheet_l2fcData)[names_wo_0] <- gsub("X", "X0", row.names(samplesheet_l2fcData)[names_wo_0])
-
-
-###>save in file : 
-write.table(samplesheet_l2fcData, paste0(data_dir,"samplesheet_log2fc_lps_ns.tsv"),col.names = T,row.names = T)
-
-
+#> Transpose to have genes in rows 
 log2fc_expr <- t(log2fc_data[,8:ncol(log2fc_data)])
 
-## to obtain positive values (shift gaussian distrib to +1 ) : 
+## to obtain positive values (shift gaussian distrib to +10 ) : 
 log2fc_expr <- log2fc_expr + 10
 
-colnames(log2fc_expr) <- row.names(samplesheet_l2fcData)
 
-colnames(log2fc_expr) <- gsub("_LPS","", colnames(log2fc_expr) )
+##> Arrange samples nomenclature: 
 
-ctr_cols <- grep("CTR", colnames(log2fc_expr))
-colnames(log2fc_expr)[ctr_cols] <- gsub("CTR","CTRL",colnames(log2fc_expr)[ctr_cols] )
+samplesheet$Group %>% as.factor() %>% levels
+
+row.names(samplesheet) <- paste( paste0("X",samplesheet$ID),
+                                          gsub("HIP","",samplesheet$PatientCode),
+                                          samplesheet$TimePointClin, sep="_")
+
+names_wo_0 <- grep("^X[1-9]_", row.names(samplesheet))
+row.names(samplesheet)[names_wo_0] <- gsub("X", "X0", row.names(samplesheet)[names_wo_0])
+
+ctrl_samples <- rownames(samplesheet)[samplesheet$Group=="CTR"]
+
+rownames(samplesheet)[which(samplesheet$Group=="CTR")] <- gsub("*_J[0-9]$|_CTR","_CTRL", ctrl_samples)
+
+colnames(log2fc_expr) <- rownames(samplesheet)
+
+###>save in file : 
+#write.table(samplesheet_l2fcData, paste0(data_dir,"samplesheet_log2fc_lps_ns.tsv"),col.names = T,row.names = T)
+
 
 
 ```
 
-Change names of patients that are J0,but are supposed to be in CTRL-Group:
-
-```{r}
-
-colnames(log2fc_expr)[grep("X02_088", colnames(log2fc_expr))] <- "X02_088_CTRL"
-colnames(log2fc_expr)[grep("X30_035", colnames(log2fc_expr))] <- "X30_035_CTRL"
-colnames(log2fc_expr)[grep("X48_061", colnames(log2fc_expr))] <- "X48_061_CTRL"
-
-
-```
 
 #### Create edesign for masigPro, by the patients-id and samplesheet info : 
 
 ```{r edesign_with_LPS/NS_samples }
 
-## Created following file manually, by looking the samples of samplesheet_l2fcData for J0-J1-J3 & CTRL. Ignored J2,J6,J8
+## Created following file manually, by looking the samples of "samplesheet" for J0-J1-J3 & CTRL.
+# Ignored J2,J4,J6,J8--> rescaled J2,J4 in J1,J3
 ## Replicates column is designed for every timepoint ,to change according to Mort / Vivant group
-
-edesign <- read_delim(paste0(workdir,"Samples_design/edesign_samples_NS_vs_LPS_timeSorted.tsv"),
-                      delim="\t", col_names = T, show_col_types = FALSE)
 ## Ignore NS, LPS, because Counts contain ratio of NS/LPS -> will compare only Mort-vs-Viv to draw conclusions
 
-#samplesheet_l2fcData <- read.table(paste0(data_dir,"samplesheet_log2fc_lps_ns.tsv"),header=T,row.names=1,sep="\t")
+edesign <- read_delim(paste0(workdir,"edesign_Timepoint_sorted_31_samples.tsv"),
+                      delim="\t", col_names = T, show_col_types = FALSE)
 
 ```
 
-remove samples of J2,J6,J7,J8 from log2fc_data :
+RENAME samples of J2,J6,J7,J8 from log2fc_data :
 
 ```{r}
 
-colnames(log2fc_expr)[which( ! colnames(log2fc_expr) %in% edesign$Description)]
- 
+bad_timing <- which(! colnames(log2fc_expr) %in% edesign$Description )
+
+colnames(log2fc_expr)[bad_timing]<- gsub("_J1","_J0", colnames(log2fc_expr)[bad_timing])
+colnames(log2fc_expr)[bad_timing]<- gsub("_J2","_J1",  colnames(log2fc_expr)[bad_timing])
+colnames(log2fc_expr)[bad_timing]<- gsub("_J4","_J3",  colnames(log2fc_expr)[bad_timing])
+colnames(log2fc_expr)[bad_timing]<- gsub("_J8","_J6",  colnames(log2fc_expr)[bad_timing])
+colnames(log2fc_expr)[bad_timing]<- gsub("_J7","_J6",  colnames(log2fc_expr)[bad_timing])
+
+j6_samples <- which(! colnames(log2fc_expr) %in% edesign$Description )
+
+
 log2fc_expr <- log2fc_expr[,which(colnames(log2fc_expr) %in% edesign$Description)]
 
 ```
 
-must be true : 
+so, data left with 31 Samples, of ctrl and J0-J1-J3
+Must be true : 
 
 ```{r}
 
@@ -191,7 +190,15 @@ all(colnames(log2fc_expr) %in% edesign$Description)
 all(edesign$Description  %in% colnames(log2fc_expr) )
  
  
-rownames(edesign ) <- edesign$Description
+##> Order Expr-columns as edesign Lines : 
+edesign_sample_order <- edesign$Description[which(edesign$Description %in% colnames(log2fc_expr))]
+
+log2fc_expr <- log2fc_expr[,edesign_sample_order]
+  
+rownames(as.data.frame(edesign) ) <- edesign$Description 
+
+#!  Gives error: rownames Deprecated in tibble, but rownames are assigned whatsoever 
+
 lps2ns_data <- list("edesign"=edesign ,"expr"=log2fc_expr )
 
 ```
@@ -202,19 +209,19 @@ Function for subsetting data to work only on one pair of comparisons, declare Mo
 ```{r}
 
 # subset_conditions <- function(edesign, expr.dat, group, cols2rmv) {
-  
-  #> re-write function with dplyr verbs !
-  group.design <- edesign %>% select(contains(group))
-
-  sub.design <- edesign %>%
-                filter(group.design == 1 ) %>%  ## keep only Mort ==1, and
-                select(-contains(cols2rmv))     ##  remove Viv, because not needed, all ==0
-
-  ## keep expr that corresponds to same samples as in sub.design :
-  sub.expr <- expr.dat %>% select(matches( rownames(sub.design)))
-
-  return(list("edesign"=sub.design, "expr"=sub.expr ))
-}
+#   
+#   #> re-write function with dplyr verbs !
+#   group.design <- edesign %>% select(contains(group))
+# 
+#   sub.design <- edesign %>%
+#                 filter(group.design == 1 ) %>%  ## keep only Mort ==1, and
+#                 select(-contains(cols2rmv))     ##  remove Viv, because not needed, all ==0
+# 
+#   ## keep expr that corresponds to same samples as in sub.design :
+#   sub.expr <- expr.dat %>% select(matches( rownames(sub.design)))
+# 
+#   return(list("edesign"=sub.design, "expr"=sub.expr ))
+# }
 
 ```
 
@@ -248,94 +255,73 @@ Repeat following for each List
 
 ```{r,masigpro_model}
 
-masigpro_model <- function(sublist, clust_num=9) {
 
-    library(maSigPro); library(dplyr)
-    library(ggpubr)
+library(maSigPro); library(dplyr); library(ggpubr)
 
-    edesign <- as.data.frame(sublist$edesign)
-    expr    <- as.data.frame(sublist$expr)
-    ## rownames(expr) <- affy_expr$EntrezGeneID # no need of rownames in expr.
-    
-    ## MUST BE TRUE: all(colnames(lps2ns_data$expr) %in% rownames(edesign) )
-    ## Remove 1st col of edesign: "Description", as it is assigned in rownames 
-    mydesign.mat <- make.design.matrix(edesign[,-1] ,degree=2)
+design.msp <- as.data.frame(lps2ns_data$edesign)
+expr    <- as.data.frame(lps2ns_data$expr)
 
-    ##> see which comparisons will be done
-    print(mydesign.mat$groups.vector)                         
+## rownames(expr) <- affy_expr$EntrezGeneID # no need of rownames in expr.
 
-    rownames(mydesign.mat$dis) <- colnames(expr)
+## MUST BE TRUE: all(colnames(lps2ns_data$expr) %in% rownames(edesign) )
+## Remove 1st col of edesign: "Description", as it is assigned in rownames 
+mydesign.mat <- make.design.matrix(design.msp[,-1] ,degree = 3 )
 
-    ## Put expr.data in order of edesign :
-    #expr <- expr[, rownames(mydesign.mat$dis)]
+##> see which comparisons will be done
+print(mydesign.mat$groups.vector)                         
 
-    fit <- p.vector(expr, mydesign.mat, Q=0.05, MT.adjust ="BH", min.obs = 10, counts=TRUE)
-    # p.vector()returns a list of values:
-    # > fit$i # returns the number of significant genes
-    # > fit$alfa # gives p-value at the Q false discovery control level
-    # > fit$SELEC # is a matrix with the significant genes and their expression values
+rownames(mydesign.mat$dis) <- colnames(expr)
 
-    nb_sigGenes <- fit$i
-    
-    cat("\nSignificant Genes found: ", nb_sigGenes)
-    ##> 3.3/ Finding significant differences
-    tstep <- T.fit(fit, step.method = "backward", alfa = 0.05)
-                    # step.method = "forward"
+## Put expr.data in order of edesign :
+#expr <- expr[, rownames(mydesign.mat$dis)]
 
-    #! Warning message:
-    #   In min(nchar(groups.vector)) : no non-missing arguments to min; returning Inf
+fit <- p.vector(expr, mydesign.mat, Q=0.05, MT.adjust ="BH", min.obs = 10, counts=TRUE)
+# p.vector()returns a list of values:
+# > fit$i # returns the number of significant genes
+# > fit$alfa # gives p-value at the Q false discovery control level
+# > fit$SELEC # is a matrix with the significant genes and their expression values
 
-    names(tstep)
+nb_sigGenes <- fit$i
 
-    ### For each selected gene the following values are given:
-    # >> p-value of the regression ANOVA
-    # >> R-squared of the model
-    # >> p-value of the regression coefficients of the selected variables
+cat("\nSignificant Genes found: ", nb_sigGenes)
+##> 3.3/ Finding significant differences
+tstep <- T.fit(fit, step.method = "backward", alfa = 0.05)
+                # step.method = "forward"
 
-    sigs <- get.siggenes(tstep, rsq = 0.6, vars = "groups")
-    #rsq = 0.6 :is a cut-off value for the R-squared of the regression model
+#! Warning message:
+#   In min(nchar(groups.vector)) : no non-missing arguments to min; returning Inf
+names(tstep)
+### For each selected gene the following values are given:
+# >> p-value of the regression ANOVA
+# >> R-squared of the model
+# >> p-value of the regression coefficients of the selected variables
+sigs <- get.siggenes(tstep, rsq = 0.6, vars = "groups")
+#rsq = 0.6 :is a cut-off value for the R-squared of the regression model
 
-    names(sigs$sig.genes)
+names(sigs$sig.genes)
 
-    ##> 4.2/ PLOT:: Visualize  the significant genes in the previous step in VivantvsMort
-    source("see.genes.mk_function.R")
-    #source("see.genes.git.R")
-    sig_data <- sigs$sig.genes
-    comparison <- names(sigs$sig.genes)[2]
-    clustering_genes <- see.genes.mk( sig_data[[comparison]], 
-                                      edesign=as.data.frame(sig_data[[comparison]]$edesign),
-                                      group.cols = c(3:ncol(edesign)), 
-                                      cluster.method="hclust", k = clust_num,
-                                      dis = mydesign.mat$dis,
-                                      show.fit = F,summary.mode = "median",
-                                      cluster.data = 1 ) # clust_num=9
+##> 4.2/ PLOT:: Visualize  the significant genes in the previous step in VivantvsMort
+source("see.genes.mk_function.R")
+#source("see.genes.git.R")
+sig_data <- sigs$sig.genes
+comparison <- names(sigs$sig.genes)[2]
+clust_num=9
+clustering_genes <- see.genes.mk( sig_data[[comparison]], 
+                                  group.cols = c(3:ncol(edesign)), 
+                                  cluster.method="hclust", k = clust_num,
+                                  dis = mydesign.mat$dis,
+                                  show.fit = F,summary.mode = "median",
+                                  cluster.data = 1 ) 
+                                  
+##> Plot All Clusters in a Grid
+library(gridExtra)
 
-    ##> Plot All Clusters in a Grid
-    library(gridExtra)
+do.call("grid.arrange", clustering_genes$plots_list  ) # list(..,ncol = clust_num/2) 
 
-    do.call("grid.arrange", clustering_genes$plots_list  ) # list(..,ncol = clust_num/2) 
-     
-    return(clustering_genes)
-}
 
 ```
 
 3.2/ Find significant genes and patterns per time-point for each comparison
-
-```{r,run_model}
-
-##> Run for each set of comparisons
-## ! Attention : each command produces a grid of plots in Plots_Window
-## when adding pdf() command before the command producing the plot -> graph is saved in pdf.
-## Must always close the pdf with dev.off()
-
-pdf("Plots/Mort_vs_Vivant_GeneClusters_9_on_LPS-to-NS_log2fc_data.pdf")
-  genes_Mort_vs_Viv  <- masigpro_model(lps2ns_data, clust_num = 9)
-dev.off()
-
-
-
-```
 
 Explore output ...
 
@@ -343,80 +329,60 @@ Explore output ...
 ##> Find for each Gene their assigned Cluster Number
 
 convert_Entrez2symbol <- function(id_list){
+  
       library(org.Hs.eg.db) # installed via biocLite. Cannot call library from an R-variable/object
       require(AnnotationDbi)
-      gene_symbols <- mapIds(x=org.Hs.eg.db,keys=id_list,column="SYMBOL",keytype="ENTREZID",multiVals = "first")
+      gene_symbols <- mapIds(x=org.Hs.eg.db,
+                             keys=id_list,
+                             column="SYMBOL",
+                             keytype="ENTREZID",
+                             multiVals = "first")
       return(gene_symbols)
 }
 
 ```
 
-
+Check gene Names in each cluster ...
 
 ```{r,find_genes}
 
 ## Extract geneSymbols from the IDs that are found for each cluster :
 ## clustering_genes$cut : gives the genes with their cluster_number (otherwise pluck (clustering_genes,"cut"))
 ## To find for a specific cluster the geneIDs :
-clustering_genes.ns$cut == "1" #  =="2",etc.
+clustering_genes$cut == "1" #  =="2",etc.
 ## which : gives only the positions where this condition is TRUE
-which(clustering_genes.ns$cut == "1")
+which(clustering_genes$cut == "1")
 ## names() : gives names of a vector (what is shown above the values as label )
-which(clustering_genes.ns$cut == "1") %>%  names()
+which(clustering_genes$cut == "1") %>%  names()
 ## Run the commands consecutively to obtain geneNames using "%>%" (pipe)
 
-geneNames_per_cluster <-  function(clust_g,i) { which(purrr::pluck(clust_g,"cut") == i) %>% names %>% convert_Entrez2symbol }
+geneNames_per_cluster <-  function(clust_g,i) { 
+          #clust_g %>% glimpse
+          which(clust_g$cut  == as.character(i) ) %>%
+          names %>% 
+          sub("X*","",.) %>% 
+          convert_Entrez2symbol 
+}
 ##>output names in EntrezID
 
-
-clust_num = 9
-
 ## Using function map() we ll run all numbers of clusters 1:9 on the function geneNames_per_cluster (.x takes value from 1:9)
-geneNames_per_cluster.ns  <- map(as.character(seq(1,clust_num)), ~geneNames_per_cluster(clustering_genes.ns,  .x))
-geneNames_per_cluster.lps <- map(as.character(seq(1,clust_num)), ~geneNames_per_cluster(clustering_genes.lps, .x))
-geneNames_per_cluster.viv <- map(as.character(seq(1,clust_num)), ~geneNames_per_cluster(clustering_genes.viv, .x))
-geneNames_per_cluster.mrt <- map(as.character(seq(1,clust_num)), ~geneNames_per_cluster(clustering_genes.mrt, .x))
+clust_num= length(clustering_genes$plots_list)
+geneNames_all_clusters  <- purrr::map(seq(from=1,to=clust_num) , ~geneNames_per_cluster(clustering_genes,.x))
 
 ##> Outputs are lists with each element the cluster 1:9, and content the geneNames
-geneNames_per_cluster.ns[[1]]
+geneNames_all_clusters[[1]]
 
 library(glue)
-names(geneNames_per_cluster.ns)  <- glue("cluster_{as.character(seq(1,clust_num))}")
-names(geneNames_per_cluster.lps) <- glue("cluster_{as.character(seq(1,clust_num))}")
-names(geneNames_per_cluster.viv) <- glue("cluster_{as.character(seq(1,clust_num))}")
-names(geneNames_per_cluster.mrt) <- glue("cluster_{as.character(seq(1,clust_num))}")
+names(geneNames_all_clusters)  <- glue("cluster_{as.character(seq(1,clust_num))}")
 
 
 ## Create Tables with 2 columns : 1/cluster-number and 2/ genes --> save in file
 
-table_geneNames_per_cluster.ns <- map_df(as.character( seq(1,clust_num )),
-                                          ~tibble("cluster"=.x, "genes"= paste(geneNames_per_cluster.ns[[as.integer(.x)]],collapse=",") ))
-
-table_geneNames_per_cluster.lps <- map_df(as.character( seq(1,clust_num )),
-                                          ~tibble("cluster"=.x, "genes"= paste(geneNames_per_cluster.lps[[as.integer(.x)]],collapse=",") ))
-
-table_geneNames_per_cluster.viv <- map_df(as.character( seq(1,clust_num )) ,
-                                          ~tibble("cluster"=.x, "genes"= paste(geneNames_per_cluster.viv[[as.integer(.x)]],collapse=",") ))
-
-table_geneNames_per_cluster.mrt <- map_df(as.character( seq(1,clust_num )) ,
-                                          ~tibble("cluster"=.x, "genes"= paste(geneNames_per_cluster.mrt[[as.integer(.x)]],collapse=",") ))
-
+table_geneNames_per_cluster <- map_df(as.character( seq(1,clust_num )), 
+                                     ~tibble("cluster"=.x,"genes"=
+                                     paste(geneNames_all_clusters[[as.integer(.x)]],collapse=",") ))
 
 # overview:
-table_geneNames_per_cluster.mrt
-
-all_tables <- list("NS"=table_geneNames_per_cluster.ns,
-                   "LPS"=table_geneNames_per_cluster.lps,
-                   "Viv"=table_geneNames_per_cluster.viv,
-                   "Mrt"=table_geneNames_per_cluster.mrt )
-
-
-## Save in files
-dir.create("Results/",showWarnings = FALSE)
-
-res_excel <- map(names(all_tables), ~ write_excel_csv2(x = pluck(all_tables,.x), file = glue("Results/GeneNames_per_Cluster_{.x}.tsv"), delim = "\t" ,col_names=T) )
-
-
-
+table_geneNames_per_cluster
 
 ```

@@ -92,8 +92,7 @@ see.genes.mk <- function (data, edesign=data$edesign,
                                 nrow(clusterdata), 
                                 nrow(clusterdata)) - cor(t(clusterdata), use = "pairwise.complete.obs")
               clust <- hclust(as.dist(dcorrel), method = agglo.method)
-              c.algo.used = paste(cluster.method, "cor", 
-                                  agglo.method, sep = "_")
+              c.algo.used = paste(cluster.method, "cor",  agglo.method, sep = "_")
             } else {
               clust <- hclust(dist(clusterdata, method = distance), 
                               method = agglo.method)
@@ -104,10 +103,10 @@ see.genes.mk <- function (data, edesign=data$edesign,
         }
         else if (cluster.method == "kmeans") {
           cut <- kmeans(clusterdata, k, iter.max)$cluster
-          c.algo.used = paste("kmeans", k, iter.max, 
-                              sep = "_")
+          c.algo.used = paste("kmeans", k, iter.max, sep = "_")
         }
         else if (cluster.method == "Mclust") {
+          library(mclust)
           if (k.mclust) {
             my.mclust <- Mclust(clusterdata)
             k = my.mclust$G
